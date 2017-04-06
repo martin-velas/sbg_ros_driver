@@ -2,6 +2,8 @@
 #include "sensor_msgs/Imu.h"
 #include "sensor_msgs/NavSatFix.h"
 #include "geometry_msgs/PoseStamped.h"
+#include "tf/tf.h"
+#include "tf/transform_broadcaster.h"
 #include <sbgEComLib.h>
 #include <sbgEComIds.h>
 
@@ -137,9 +139,14 @@ int main(int argc, char **argv)
 
   ROS_INFO("START RECEIVING DATA");
 
-  imu_msg.header.frame_id = "map";
-  nav_msg.header.frame_id = "map";
-  pose_msg.header.frame_id = "map";
+  imu_msg.header.frame_id = "imu_base";
+  nav_msg.header.frame_id = "imu_base";
+  pose_msg.header.frame_id = "imu_base";
+
+  tf::TransformBroadcaster tf_broadcaster;
+  tf::StampedTransform tf_msg;
+  tf_msg.frame_id_ = "imu_base";
+  tf_msg.child_frame_id_ = "imu";
 
   ros::Rate loop_rate(25);
   while (ros::ok())
@@ -157,6 +164,11 @@ int main(int argc, char **argv)
       imu_pub.publish(imu_msg);
       pose_msg.header.stamp = ros::Time::now();
       pose_pub.publish(pose_msg);
+
+      tf_msg.stamp_ = ros::Time::now();
+      tf_msg.setOrigin(tf::Vector3(pose_msg.pose.position.x, pose_msg.pose.position.y, pose_msg.pose.position.z));
+      tf_msg.setRotation(tf::Quaternion(pose_msg.pose.orientation.x, pose_msg.pose.orientation.y, pose_msg.pose.orientation.z, pose_msg.pose.orientation.w));
+      tf_broadcaster.sendTransform(tf_msg);
 
       new_imu_msg = false;
     }
