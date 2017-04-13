@@ -7,13 +7,16 @@
 #include <sbgEComLib.h>
 #include <sbgEComIds.h>
 
+#include <sensor_msgs/TimeReference.h>
+
 sensor_msgs::Imu imu_msg;
 sensor_msgs::NavSatFix nav_msg;
 geometry_msgs::PoseStamped pose_msg;
+sensor_msgs::TimeReference time_ref;
 bool new_imu_msg;
 bool new_nav_msg;
 bool new_twist_msg;
-
+bool new_timeref = true;
 /*!
  *  Callback definition called each time a new log is received.
  *  \param[in]  pHandle                 Valid handle on the sbgECom instance that has called this callback.
@@ -32,11 +35,13 @@ SbgErrorCode onLogReceived(SbgEComHandle *pHandle, SbgEComClass msgClass, SbgECo
       imu_msg.orientation.y = pLogData->ekfEulerData.euler[2];
       imu_msg.orientation.z = pLogData->ekfEulerData.euler[3];
       imu_msg.orientation.w = pLogData->ekfEulerData.euler[0];
+      imu_msg.header.stamp = ros::Time::now();
 
       pose_msg.pose.orientation.x = pLogData->ekfEulerData.euler[1];
       pose_msg.pose.orientation.y = pLogData->ekfEulerData.euler[2];
       pose_msg.pose.orientation.z = pLogData->ekfEulerData.euler[3];
       pose_msg.pose.orientation.w = pLogData->ekfEulerData.euler[0];
+      pose_msg.header.stamp = imu_msg.header.stamp;
 
       new_imu_msg = true;
       break;
@@ -63,7 +68,12 @@ SbgErrorCode onLogReceived(SbgEComHandle *pHandle, SbgEComClass msgClass, SbgECo
       imu_msg.angular_velocity.z = pLogData->imuData.gyroscopes[2];
       new_imu_msg = true;
       break;
-    // case SBG_ECOM_LOG_UTC_TIME:
+
+    case SBG_ECOM_LOG_UTC_TIME:
+      time_ref.header.stamp = ros::Time::now();
+      time_ref.time_ref = ros::Time(pLogData->utcData.gpsTimeOfWeek * 1e-3);
+      new_timeref = true;
+      break;
     //   pInsSBG->new_time = true;
     //   pInsSBG->year          = pLogData->utcData.year;
     //   pInsSBG->month         = pLogData->utcData.month;
@@ -88,6 +98,7 @@ int main(int argc, char **argv)
   ros::Publisher imu_pub = n.advertise<sensor_msgs::Imu>("imu", 10);
   ros::Publisher gps_pub = n.advertise<sensor_msgs::NavSatFix>("fix", 10);
   ros::Publisher pose_pub = n.advertise<geometry_msgs::PoseStamped>("imu_pose", 10);
+  ros::Publisher timeref_pub = n.advertise<sensor_msgs::TimeReference>("imu_timeref", 10);
 
   std::string uart_port;
   int uart_baud_rate;
@@ -127,6 +138,9 @@ int main(int argc, char **argv)
   errorCode = sbgEComCmdOutputSetConf(&comHandle, SBG_ECOM_OUTPUT_PORT_A, SBG_ECOM_CLASS_LOG_ECOM_0, SBG_ECOM_LOG_SHIP_MOTION, SBG_ECOM_OUTPUT_MODE_DIV_8);
   if (errorCode != SBG_NO_ERROR){ROS_WARN("sbgEComCmdOutputSetConf SBG_ECOM_LOG_SHIP_MOTION Error");}
 
+  errorCode = sbgEComCmdOutputSetConf(&comHandle, SBG_ECOM_OUTPUT_PORT_A, SBG_ECOM_CLASS_LOG_ECOM_0, SBG_ECOM_LOG_UTC_TIME, SBG_ECOM_OUTPUT_MODE_DIV_8);
+  if (errorCode != SBG_NO_ERROR){ROS_WARN("sbgEComCmdOutputSetConf SBG_ECOM_LOG_UTC_TIME Error");}
+
   // SAVE AND REBOOT
   errorCode = sbgEComCmdSettingsAction(&comHandle, SBG_ECOM_SAVE_SETTINGS);
   if (errorCode != SBG_NO_ERROR){ROS_WARN("sbgEComCmdSettingsAction Error");}
@@ -159,13 +173,15 @@ int main(int argc, char **argv)
       new_nav_msg = false;
     }
 
+    if(new_timeref) {
+      timeref_pub.publish(time_ref);
+    }
+
     if(new_imu_msg){
-      imu_msg.header.stamp = ros::Time::now();
       imu_pub.publish(imu_msg);
-      pose_msg.header.stamp = ros::Time::now();
       pose_pub.publish(pose_msg);
 
-      tf_msg.stamp_ = ros::Time::now();
+      tf_msg.stamp_ = pose_msg.header.stamp;
       tf_msg.setOrigin(tf::Vector3(pose_msg.pose.position.x, pose_msg.pose.position.y, pose_msg.pose.position.z));
       tf_msg.setRotation(tf::Quaternion(pose_msg.pose.orientation.x, pose_msg.pose.orientation.y, pose_msg.pose.orientation.z, pose_msg.pose.orientation.w));
       tf_broadcaster.sendTransform(tf_msg);
