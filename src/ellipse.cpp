@@ -1,3 +1,5 @@
+#include <fstream>
+
 #include "ros/ros.h"
 #include "sensor_msgs/Imu.h"
 #include "sensor_msgs/NavSatFix.h"
@@ -11,6 +13,8 @@
 
 #include <sbg_driver/SolutionStatus.h>
 
+using namespace std;
+
 geometry_msgs::PoseStamped pose_msg;
 geometry_msgs::Vector3Stamped pose_errors_msg;
 bool new_pose_msg = false;
@@ -21,6 +25,56 @@ sensor_msgs::TimeReference time_ref;
 bool new_timeref = false;
 sbg_driver::SolutionStatus status_msg;
 bool new_status = false;
+
+class JsonGenerator {
+public:
+  JsonGenerator(void) {
+  }
+
+  void openFile(const string &filename) {
+    file.open(filename.c_str());
+  }
+
+  void genDict(const sbg_driver::SolutionStatus &status, const SbgLogEkfQuatData &quat_data) {
+    file << "{ \"type\":\"quat_data\", \"timeStamp\":" << quat_data.timeStamp << ", ";
+    genDict(status);
+    file << ", \"quaternion\":[" << quat_data.quaternion[1] << ", " << quat_data.quaternion[2] << ", " << quat_data.quaternion[3] << ", " << quat_data.quaternion[0] << "]";
+    file << ", \"error\":[" << quat_data.eulerStdDev[0] << ", " << quat_data.eulerStdDev[1] << ", " << quat_data.eulerStdDev[2] << "] }";
+    file << endl;
+  }
+
+  void genDict(const sbg_driver::SolutionStatus &status, const SbgLogEkfNavData &nav_data) {
+    file << "{ \"type\":\"nav_data\", \"timeStamp\":" << nav_data.timeStamp << ", ";
+    genDict(status);
+    file << ", \"position\":[" << nav_data.position[0] << ", " << nav_data.position[1] << ", " << nav_data.position[2] << "]";
+    file << ", \"error\":[" << nav_data.positionStdDev[0] << ", " << nav_data.positionStdDev[1] << ", " << nav_data.positionStdDev[2] << "] }";
+    file << endl;
+  }
+
+  void genDict(const SbgLogUtcData &utc_data) {
+    file << "{ \"type\":\"utc_data\", \"timeStamp\":" << utc_data.timeStamp << ", \"gpsTimeOfWeek\":" << utc_data.gpsTimeOfWeek * 1e-3 << " }";
+    file << endl;
+  }
+
+protected:
+
+  void genDict(const sbg_driver::SolutionStatus &status) {
+    file << "\"status\": { \"solution_mode\":\"" << status_msg.solution_mode << "\""
+        << ", \"attitude_valid\":" << (bool)status_msg.attitude_valid
+        << ", \"heading_valid\":" << (bool)status_msg.heading_valid
+        << ", \"velocity_valid\":" << (bool)status_msg.velocity_valid
+        << ", \"position_valid\":" << (bool)status_msg.position_valid
+        << ", \"vert_ref_used\":" << (bool)status_msg.vert_ref_used
+        << ", \"mag_ref_used\":" << (bool)status_msg.mag_ref_used
+        << ", \"gps1_vel_used\":" << (bool)status_msg.gps1_vel_used
+        << ", \"gps1_pos_used\":" << (bool)status_msg.gps1_pos_used
+        << ", \"gps1_course_used\":" << (bool)status_msg.gps1_course_used
+        << ", \"sol_align_valid\":" << (bool)status_msg.sol_align_valid << " }";
+  }
+
+private:
+  ofstream file;
+};
 
 void setStatus(const uint16 status, const ros::Time ros_now) {
   status_msg.stamp = ros_now;
@@ -89,6 +143,7 @@ void setStatus(const uint16 status, const ros::Time ros_now) {
 SbgErrorCode onLogReceived(SbgEComHandle *pHandle, SbgEComClass msgClass, SbgEComMsgId msg, const SbgBinaryLogData *pLogData, void *pUserArg)
 {
   ros::Time ros_now = ros::Time::now();
+  JsonGenerator *generator = (JsonGenerator *)pUserArg;
 
   switch (msg){
     case SBG_ECOM_LOG_EKF_QUAT:
@@ -103,6 +158,9 @@ SbgErrorCode onLogReceived(SbgEComHandle *pHandle, SbgEComClass msgClass, SbgECo
       pose_errors_msg.header.stamp = ros_now;
       new_pose_msg = true;
       setStatus(pLogData->ekfQuatData.status, ros_now);
+      if(generator != NULL) {
+        generator->genDict(status_msg, pLogData->ekfQuatData);
+      }
       break;
 
     case SBG_ECOM_LOG_EKF_NAV:
@@ -116,12 +174,18 @@ SbgErrorCode onLogReceived(SbgEComHandle *pHandle, SbgEComClass msgClass, SbgECo
       nav_errors_msg.header.stamp = ros_now;
       new_nav_msg = true;
       setStatus(pLogData->ekfNavData.status, ros_now);
+      if(generator != NULL) {
+        generator->genDict(status_msg, pLogData->ekfNavData);
+      }
       break;
 
     case SBG_ECOM_LOG_UTC_TIME:
       time_ref.header.stamp = ros_now;
       time_ref.time_ref = ros::Time(pLogData->utcData.gpsTimeOfWeek * 1e-3);
       new_timeref = true;
+      if(generator != NULL) {
+        generator->genDict(pLogData->utcData);
+      }
       break;
 
     default:
@@ -134,7 +198,7 @@ int main(int argc, char **argv)
 {
   ros::init(argc, argv, "sbg_ellipse");
 
-  ros::NodeHandle n;
+  ros::NodeHandle n("~");
   ros::Publisher gps_pub = n.advertise<sensor_msgs::NavSatFix>("imu_nav", 10);
   ros::Publisher gps_err_pub = n.advertise<geometry_msgs::Vector3Stamped>("imu_nav_errors", 10);
   ros::Publisher pose_pub = n.advertise<geometry_msgs::PoseStamped>("imu_pose", 10);
@@ -144,9 +208,11 @@ int main(int argc, char **argv)
 
   std::string uart_port;
   int uart_baud_rate;
+  string output_filename;
 
-  n.param<std::string>("uart_port", uart_port, "/dev/ttyUSB0");
+  n.param<string>("uart_port", uart_port, "/dev/ttyUSB0");
   n.param<int>("uart_baud_rate", uart_baud_rate, 115200);
+  n.param<string>("output_file", output_filename, "");
 
     // ********************* Initialize the SBG  *********************
   SbgEComHandle       comHandle;
@@ -184,8 +250,15 @@ int main(int argc, char **argv)
   ROS_INFO("CONFIGURATION DONE");
 
   // ************************** SBG Callback for data ************************
+  JsonGenerator generator;
   bool test = false;
-  sbgEComSetReceiveLogCallback(&comHandle, onLogReceived, NULL);
+  if(output_filename.empty()) {
+    sbgEComSetReceiveLogCallback(&comHandle, onLogReceived, NULL);
+  } else {
+    generator.openFile(output_filename);
+    sbgEComSetReceiveLogCallback(&comHandle, onLogReceived, (void *)&generator);
+    ROS_INFO_STREAM("OUTPUT_FILE: " << output_filename);
+  }
 
   ROS_INFO("START RECEIVING DATA");
 
