@@ -198,7 +198,7 @@ int main(int argc, char **argv)
 {
   ros::init(argc, argv, "sbg_ellipse");
 
-  ros::NodeHandle n("~");
+  ros::NodeHandle n;
   ros::Publisher gps_pub = n.advertise<sensor_msgs::NavSatFix>("imu_nav", 10);
   ros::Publisher gps_err_pub = n.advertise<geometry_msgs::Vector3Stamped>("imu_nav_errors", 10);
   ros::Publisher pose_pub = n.advertise<geometry_msgs::PoseStamped>("imu_pose", 10);
@@ -210,9 +210,9 @@ int main(int argc, char **argv)
   int uart_baud_rate;
   string output_filename;
 
-  n.param<string>("uart_port", uart_port, "/dev/ttyUSB0");
-  n.param<int>("uart_baud_rate", uart_baud_rate, 115200);
-  n.param<string>("output_file", output_filename, "");
+  n.param<string>("/sbg_ellipse/uart_port", uart_port, "/dev/ttyUSB0");
+  n.param<int>("/sbg_ellipse/uart_baud_rate", uart_baud_rate, 115200);
+  n.param<string>("/sbg_ellipse/output_file", output_filename, "");
 
     // ********************* Initialize the SBG  *********************
   SbgEComHandle       comHandle;
