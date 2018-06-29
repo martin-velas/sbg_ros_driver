@@ -10,6 +10,8 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   tf
   message_generation
+  image_transport
+  cv_bridge
 )
 
 ## System dependencies are found with CMake's conventions
@@ -137,8 +139,13 @@ include_directories(
 ## either from message generation or dynamic reconfigure
 # add_dependencies(sbg ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
+find_package( OpenCV REQUIRED )
+include_directories( ${OpenCV_INCLUDE_DIRS})
+link_directories(${OpenCV_LIBRARY_DIRS})
+
 ## Declare a C++ executable
-add_executable(ellipse src/ellipse.cpp ${SRC} ${COMMON_SRC})
+add_executable(ellipse src/ellipse.cpp src/info_display.cpp ${SRC} ${COMMON_SRC})
+target_link_libraries(ellipse ${OpenCV_LIBS})
 
 target_compile_options(ellipse PRIVATE -fpermissive)
 

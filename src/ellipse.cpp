@@ -7,6 +7,7 @@
 #include "tf/tf.h"
 #include "tf/transform_broadcaster.h"
 #include <sensor_msgs/TimeReference.h>
+#include <image_transport/image_transport.h>
 
 #include <sbgEComLib.h>
 #include <sbgEComIds.h>
@@ -194,6 +195,8 @@ SbgErrorCode onLogReceived(SbgEComHandle *pHandle, SbgEComClass msgClass, SbgECo
   return SBG_NO_ERROR;
 }
 
+void publish_info_panel(image_transport::Publisher &display_pub, geometry_msgs::Vector3Stamped pose_errors_msg);
+
 int main(int argc, char **argv)
 {
   ros::init(argc, argv, "sbg_ellipse");
@@ -205,6 +208,8 @@ int main(int argc, char **argv)
   ros::Publisher pose_err_pub = n.advertise<geometry_msgs::Vector3Stamped>("imu_pose_errors", 10);
   ros::Publisher timeref_pub = n.advertise<sensor_msgs::TimeReference>("imu_timeref", 10);
   ros::Publisher status_pub = n.advertise<sbg_driver::SolutionStatus>("imu_status", 10);
+  image_transport::ImageTransport it(n);
+  image_transport::Publisher display_pub = it.advertise("info_display", 10);
 
   std::string uart_port;
   int uart_baud_rate;
@@ -299,6 +304,8 @@ int main(int argc, char **argv)
       tf_msg.setOrigin(tf::Vector3(pose_msg.pose.position.x, pose_msg.pose.position.y, pose_msg.pose.position.z));
       tf_msg.setRotation(tf::Quaternion(pose_msg.pose.orientation.x, pose_msg.pose.orientation.y, pose_msg.pose.orientation.z, pose_msg.pose.orientation.w));
       tf_broadcaster.sendTransform(tf_msg);
+
+      publish_info_panel(display_pub, pose_errors_msg);
 
       new_pose_msg = false;
     }
