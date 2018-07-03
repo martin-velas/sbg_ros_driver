@@ -147,7 +147,6 @@ link_directories(${OpenCV_LIBRARY_DIRS})
 
 ## Declare a C++ executable
 add_executable(ellipse src/ellipse.cpp src/info_display.cpp ${SRC} ${COMMON_SRC})
-target_link_libraries(ellipse ${OpenCV_LIBS})
 
 target_compile_options(ellipse PRIVATE -fpermissive)
 
