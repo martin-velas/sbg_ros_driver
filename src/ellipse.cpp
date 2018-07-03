@@ -1,4 +1,5 @@
 #include <fstream>
+#include <cmath>
 
 #include "ros/ros.h"
 #include "sensor_msgs/Imu.h"
@@ -39,11 +40,12 @@ public:
     file.open(filename.c_str());
   }
 
-  void genDict(const sbg_driver::SolutionStatus &status, const SbgLogEkfQuatData &quat_data) {
-    file << "{ \"type\":\"quat_data\", \"timeStamp\":" << quat_data.timeStamp << ", ";
+  void genDict(const sbg_driver::SolutionStatus &status, const uint32 timeStamp,
+      const geometry_msgs::Quaternion &quaternion, const geometry_msgs::Vector3 eulerStdDev) {
+    file << "{ \"type\":\"quat_data\", \"timeStamp\":" << timeStamp << ", ";
     genDict(status);
-    file << ", \"quaternion\":[" << quat_data.quaternion[1] << ", " << quat_data.quaternion[2] << ", " << quat_data.quaternion[3] << ", " << quat_data.quaternion[0] << "]";
-    file << ", \"error\":[" << quat_data.eulerStdDev[0] << ", " << quat_data.eulerStdDev[1] << ", " << quat_data.eulerStdDev[2] << "] }";
+    file << ", \"quaternion\":[" << quaternion.x << ", " << quaternion.y << ", " << quaternion.z << ", " << quaternion.w << "]";
+    file << ", \"error\":[" << eulerStdDev.x << ", " << eulerStdDev.y << ", " << eulerStdDev.z << "] }";
     file << endl;
   }
 
@@ -148,6 +150,25 @@ void discard_heading(float *w, float *x, float *y, float *z) {
   *z = q_noheading.z();
 }
 
+void rp_to_quaternion(const float roll_angle, const float pitch_angle, geometry_msgs::Quaternion &orientation) {
+  Eigen::Matrix3f roll, pitch;
+  float sr = sin(roll_angle);
+  float cr = cos(roll_angle);
+  roll << 1.0, 0.0, 0.0,
+          0.0,  cr, -sr,
+          0.0,  sr,  cr;
+  float sp = sin(pitch_angle);
+  float cp = cos(pitch_angle);
+  pitch <<  cp, 0.0,  sp,
+           0.0, 1.0, 0.0,
+           -sp, 0.0,  cp;
+  Eigen::Quaternionf quaternion(pitch * roll);
+  orientation.x = quaternion.x();
+  orientation.y = quaternion.y();
+  orientation.z = quaternion.z();
+  orientation.w = quaternion.w();
+}
+
 /*!
  *  Callback definition called each time a new log is received.
  *  \param[in]  pHandle                 Valid handle on the sbgECom instance that has called this callback.
@@ -163,7 +184,7 @@ SbgErrorCode onLogReceived(SbgEComHandle *pHandle, SbgEComClass msgClass, SbgECo
   JsonGenerator *generator = (JsonGenerator *)pUserArg;
 
   switch (msg){
-    case SBG_ECOM_LOG_EKF_QUAT:
+    /*case SBG_ECOM_LOG_EKF_QUAT:
       if(discard_heading) {
         discard_heading(pLogData->ekfQuatData.quaternion,
             pLogData->ekfQuatData.quaternion+1,
@@ -182,7 +203,23 @@ SbgErrorCode onLogReceived(SbgEComHandle *pHandle, SbgEComClass msgClass, SbgECo
       new_pose_msg = true;
       setStatus(pLogData->ekfQuatData.status, ros_now);
       if(generator != NULL) {
-        generator->genDict(status_msg, pLogData->ekfQuatData);
+        generator->genDict(status_msg, pLogData->ekfQuatData.timeStamp, pose_msg.pose.orientation, pose_errors_msg.vector);
+      }
+      break;*/
+
+    case SBG_ECOM_LOG_EKF_EULER:
+      rp_to_quaternion(pLogData->ekfEulerData.euler[0],
+          pLogData->ekfEulerData.euler[1], pose_msg.pose.orientation);
+
+      pose_msg.header.stamp = ros_now;
+      pose_errors_msg.vector.x = pLogData->ekfEulerData.eulerStdDev[0];
+      pose_errors_msg.vector.y = pLogData->ekfEulerData.eulerStdDev[1];
+      pose_errors_msg.vector.z = pLogData->ekfEulerData.eulerStdDev[2];
+      pose_errors_msg.header.stamp = ros_now;
+      new_pose_msg = true;
+      setStatus(pLogData->ekfEulerData.status, ros_now);
+      if(generator != NULL) {
+        generator->genDict(status_msg, pLogData->ekfEulerData.timeStamp, pose_msg.pose.orientation, pose_errors_msg.vector);
       }
       break;
 
@@ -263,7 +300,7 @@ int main(int argc, char **argv)
   // ****************************** SBG Config ******************************
   // ToDo: improve configuration capabilities
 
-  errorCode = sbgEComCmdOutputSetConf(&comHandle, SBG_ECOM_OUTPUT_PORT_A, SBG_ECOM_CLASS_LOG_ECOM_0, SBG_ECOM_LOG_EKF_QUAT, SBG_ECOM_OUTPUT_MODE_DIV_2);
+  errorCode = sbgEComCmdOutputSetConf(&comHandle, SBG_ECOM_OUTPUT_PORT_A, SBG_ECOM_CLASS_LOG_ECOM_0, SBG_ECOM_LOG_EKF_EULER, SBG_ECOM_OUTPUT_MODE_DIV_2);
   if (errorCode != SBG_NO_ERROR){ROS_WARN("sbgEComCmdOutputSetConf SBG_ECOM_LOG_EKF_QUAT Error");}
 
   errorCode = sbgEComCmdOutputSetConf(&comHandle, SBG_ECOM_OUTPUT_PORT_A, SBG_ECOM_CLASS_LOG_ECOM_0, SBG_ECOM_LOG_EKF_NAV, SBG_ECOM_OUTPUT_MODE_DIV_2);
