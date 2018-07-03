@@ -135,17 +135,17 @@ void setStatus(const uint16 status, const ros::Time ros_now) {
   new_status = true;
 }
 
-void discard_heading(geometry_msgs::Quaternion &rotation) {
-  Eigen::Matrix3f R = Eigen::Quaternionf(rotation.w, rotation.x, rotation.y, rotation.z).matrix();
+void discard_heading(float *w, float *x, float *y, float *z) {
+  Eigen::Matrix3f R = Eigen::Quaternionf(*w, *x, *y, *z).matrix();
   float angle = acos(R(2,2));                   // dot product [0,0,1] and R*[0,0,1]
   Eigen::Vector3f axis(-R(1,2), R(0,2), 0);     // cross product [0,0,1] and R*[0,0,1]
   axis.normalize();
   Eigen::AngleAxisf aa_noheading(angle, axis);
   Eigen::Quaternionf q_noheading(aa_noheading);
-  rotation.w = q_noheading.w();
-  rotation.x = q_noheading.x();
-  rotation.y = q_noheading.y();
-  rotation.z = q_noheading.z();
+  *w = q_noheading.w();
+  *x = q_noheading.x();
+  *y = q_noheading.y();
+  *z = q_noheading.z();
 }
 
 /*!
@@ -164,13 +164,16 @@ SbgErrorCode onLogReceived(SbgEComHandle *pHandle, SbgEComClass msgClass, SbgECo
 
   switch (msg){
     case SBG_ECOM_LOG_EKF_QUAT:
+      if(discard_heading) {
+        discard_heading(pLogData->ekfQuatData.quaternion,
+            pLogData->ekfQuatData.quaternion+1,
+            pLogData->ekfQuatData.quaternion+2,
+            pLogData->ekfQuatData.quaternion+3);
+      }
       pose_msg.pose.orientation.x = pLogData->ekfQuatData.quaternion[1];
       pose_msg.pose.orientation.y = pLogData->ekfQuatData.quaternion[2];
       pose_msg.pose.orientation.z = pLogData->ekfQuatData.quaternion[3];
       pose_msg.pose.orientation.w = pLogData->ekfQuatData.quaternion[0];
-      if(discard_heading) {
-        discard_heading(pose_msg.pose.orientation);
-      }
       pose_msg.header.stamp = ros_now;
       pose_errors_msg.vector.x = pLogData->ekfQuatData.eulerStdDev[0];
       pose_errors_msg.vector.y = pLogData->ekfQuatData.eulerStdDev[1];
